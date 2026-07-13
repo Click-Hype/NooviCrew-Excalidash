@@ -1,0 +1,257 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+      
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm ci
+      
+      - name: Generate Prisma client
+        run: |
+          cd backend
+          npx prisma generate
+      
+      - name: Run backend tests
+        run: |
+          cd backend
+          npm test
+
+      - name: Build backend
+        run: |
+          cd backend
+          npm run build
+
+  frontend-unit-tests:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+      
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Run frontend tests
+        run: |
+          cd frontend
+          npm test
+
+      - name: Lint and build frontend
+        run: |
+          cd frontend
+          npm run lint
+          npm run build
+
+  mcp-tests:
+    name: Hermes MCP Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+
+      - name: Install and validate MCP
+        working-directory: MCP/excalidash
+        run: |
+          npm ci
+          npm test
+          npm audit --omit=dev
+
+  production-compose:
+    name: Production Compose Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Validate scripts and pinned production images
+        run: |
+          sh -n scripts/init-production-env.sh scripts/production-preflight.sh scripts/production-smoke.sh
+          version="$(cat VERSION)"
+          grep -F "ghcr.io/click-hype/noovicrew-excalidash-backend:${version}" docker-compose.prod.yml
+          grep -F "ghcr.io/click-hype/noovicrew-excalidash-frontend:${version}" docker-compose.prod.yml
+          env_file="$(mktemp)"
+          rm "$env_file"
+          ./scripts/init-production-env.sh "$env_file"
+          ENV_FILE="$env_file" ./scripts/production-preflight.sh
+          rm -f "$env_file"
+
+      - name: Check Dockerfiles
+        run: |
+          docker build --check -f backend/Dockerfile backend
+          docker build --check -f frontend/Dockerfile .
+
+  e2e-tests:
+    name: E2E Browser Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+      
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm ci
+      
+      - name: Generate Prisma client
+        run: |
+          cd backend
+          npx prisma generate
+      
+      - name: Setup backend database
+        run: |
+          cd backend
+          node scripts/provider-prisma.cjs migrate deploy
+        env:
+          DATABASE_URL: file:${{ github.workspace }}/backend/prisma/e2e-test.db
+      
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Install E2E test dependencies
+        run: |
+          cd e2e
+          npm ci
+      
+      - name: Install Playwright browsers
+        run: |
+          cd e2e
+          npx playwright install chromium --with-deps
+      
+      - name: Start servers and run E2E tests
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            kill "${BACKEND_PID:-}" "${FRONTEND_PID:-}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          # Start backend server in background
+          cd backend
+          DATABASE_URL="file:${{ github.workspace }}/backend/prisma/e2e-test.db" \
+            FRONTEND_URL="http://localhost:6767" \
+            DISABLE_ONBOARDING_GATE=true \
+            RATE_LIMIT_MAX_REQUESTS=100000 \
+            CSRF_MAX_REQUESTS=100000 \
+            npm run dev &
+          BACKEND_PID=$!
+          cd ..
+          
+          # Wait for backend to be ready
+          echo "Waiting for backend server..."
+          for i in {1..30}; do
+            if curl --fail --silent http://localhost:8000/health > /dev/null; then
+              echo "Backend is ready!"
+              break
+            fi
+            echo "Attempt $i: Backend not ready yet..."
+            sleep 2
+          done
+          curl --fail --silent --show-error http://localhost:8000/health > /dev/null
+          
+          # Start frontend server in background
+          cd frontend
+          npm run dev -- --host &
+          FRONTEND_PID=$!
+          cd ..
+          
+          # Wait for frontend to be ready
+          echo "Waiting for frontend server..."
+          for i in {1..30}; do
+            if curl --fail --silent http://localhost:6767 > /dev/null; then
+              echo "Frontend is ready!"
+              break
+            fi
+            echo "Attempt $i: Frontend not ready yet..."
+            sleep 2
+          done
+          curl --fail --silent --show-error http://localhost:6767 > /dev/null
+          
+          # Run E2E tests
+          cd e2e
+          NO_SERVER=true CI=true E2E_BYPASS_ONBOARDING=true npx playwright test
+        env:
+          DATABASE_URL: file:${{ github.workspace }}/backend/prisma/e2e-test.db
+      
+  # Assertion-based security regressions (not the legacy console-only script).
+  security-tests:
+    name: Security Regression Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '20'
+      
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm ci
+      
+      - name: Generate Prisma client
+        run: |
+          cd backend
+          npx prisma generate
+      
+      - name: Run security tests
+        run: |
+          cd backend
+          npx vitest run \
+            src/__tests__/csrf-trust-proxy.test.ts \
+            src/__tests__/user-sandboxing.test.ts \
+            src/middleware/auth.test.ts \
+            src/routes/files.test.ts

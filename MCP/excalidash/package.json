@@ -1,0 +1,21 @@
+{
+  "name": "@noovicrew/excalidash-hermes-mcp",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal stdio MCP and CLI for Hermes agents using the persistent ExcaliDash API",
+  "bin": {
+    "excalidash-hermes-mcp": "mcp.mjs",
+    "excalidash-hermes": "cli.mjs"
+  },
+  "scripts": {
+    "start": "node mcp.mjs",
+    "test": "node --test *.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

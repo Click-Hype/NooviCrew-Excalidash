@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Wrapper da CLI do ExcaliDash para agentes com terminal.
+# Carrega configuração de fora do Git e chama a CLI Node. Uso: ./excalidash <cmd> [args]
+set -euo pipefail
+CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
+CREDS="${EXCALIDASH_ENV_FILE:-${EXCALIDASH_ENV:-${CONFIG_HOME}/excalidash/env}}"
+[ -f "$CREDS" ] && . "$CREDS"
+exec node "$(cd "$(dirname "$0")" && pwd)/cli.mjs" "$@"

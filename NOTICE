@@ -1,0 +1,26 @@
+ExcaliDash — NooviCrew downstream distribution
+
+This distribution is based on the ExcaliDash project created by Zimeng Xiong
+and developed by its upstream contributors:
+https://github.com/ZimengXiong/ExcaliDash
+
+Downstream modifications are maintained by Click-Hype / NooviCrew contributors:
+https://github.com/Click-Hype/NooviCrew-Excalidash
+
+ExcaliDash and these modifications are distributed under the GNU Affero
+General Public License, version 3 only. See LICENSE for the complete terms.
+Nothing in this notice implies endorsement by the upstream project.
+
+The user interface embeds the Excalidraw package and other third-party open
+source dependencies. Those components remain subject to their respective
+licenses and copyright notices. Dependency manifests and lockfiles identify the
+versions included in each build.
+
+The `MCP/` subtree contains an upstream-derived Excalidraw MCP toolkit under
+the MIT License. Its original copyright notice and license are preserved in
+`MCP/LICENSE`. The persistent ExcaliDash/Hermes bridge is distributed in that
+subtree as part of this downstream project.
+
+Example-design credits retained from the upstream project:
+- https://github.com/Prakash-sa/system-design-ultimatum
+- https://github.com/kitsteam/excalidraw-examples

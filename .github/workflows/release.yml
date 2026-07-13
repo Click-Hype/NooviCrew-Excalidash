@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  containers:
+    name: Publish containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Verify tag and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+          node scripts/check-public-tree.mjs
+
+      - name: Authenticate to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build and publish backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          image="ghcr.io/click-hype/noovicrew-excalidash-backend"
+          docker build --file backend/Dockerfile --tag "$image:$version" --tag "$image:latest" backend
+          docker push "$image:$version"
+          docker push "$image:latest"
+
+      - name: Build and publish frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          image="ghcr.io/click-hype/noovicrew-excalidash-frontend"
+          docker build --file frontend/Dockerfile \
+            --build-arg "VITE_APP_VERSION=$version" \
+            --build-arg "VITE_APP_BUILD_LABEL=release" \
+            --tag "$image:$version" --tag "$image:latest" .
+          docker push "$image:$version"
+          docker push "$image:latest"
+
+  github-release:
+    name: Publish GitHub Release
+    needs: containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Build source and checksum assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          prefix="NooviCrew-Excalidash-${version}/"
+          archive="NooviCrew-Excalidash-${version}.tar.gz"
+          git archive --format=tar.gz --prefix="$prefix" --output="$archive" HEAD
+          sha256sum "$archive" > SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cat VERSION)"
+          gh release create "v${version}" \
+            --verify-tag \
+            --title "ExcaliDash v${version}" \
+            --notes-file RELEASE.md \
+            "NooviCrew-Excalidash-${version}.tar.gz" \
+            SHA256SUMS

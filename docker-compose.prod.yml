@@ -1,0 +1,102 @@
+services:
+  backend:
+    # Stable downstream release. Override with a digest for stricter pinning.
+    image: ${EXCALIDASH_BACKEND_IMAGE:-ghcr.io/click-hype/noovicrew-excalidash-backend:0.6.0}
+    container_name: excalidash-backend
+    environment:
+      - DATABASE_PROVIDER=sqlite
+      - DATABASE_URL=file:/app/prisma/dev.db
+      - PORT=8000
+      - NODE_ENV=production
+      - AUTH_MODE=${AUTH_MODE:-local}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:6767}
+      # Keep disabled by default; only enable when a trusted proxy sanitizes forwarded headers.
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      - ENFORCE_HTTPS_REDIRECT=${ENFORCE_HTTPS_REDIRECT:-true}
+      - ENABLE_AUDIT_LOGGING=${ENABLE_AUDIT_LOGGING:-true}
+      - ENABLE_REFRESH_TOKEN_ROTATION=${ENABLE_REFRESH_TOKEN_ROTATION:-true}
+      # Optional for single-instance deployments:
+      # if unset, backend auto-generates and persists one in the volume.
+      # Recommended to set explicitly for portability and multi-instance setups.
+      - JWT_SECRET=${JWT_SECRET:-}
+      - CSRF_SECRET=${CSRF_SECRET:-}
+      # Set this before issuing API keys. It must remain stable across upgrades.
+      - API_KEY_HASH_PEPPER=${API_KEY_HASH_PEPPER:-}
+      - UPDATE_CHECK_OUTBOUND=${UPDATE_CHECK_OUTBOUND:-true}
+      - BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-}
+      - BACKUP_DIR=/app/backups
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
+      # Optional OIDC settings (required for AUTH_MODE=hybrid or oidc_enforced)
+      # - OIDC_PROVIDER_NAME=Authentik
+      # - OIDC_ISSUER_URL=https://auth.example.com/application/o/excalidash/
+      # - OIDC_CLIENT_ID=your-client-id
+      # - OIDC_CLIENT_SECRET=your-client-secret
+      # - OIDC_REDIRECT_URI=https://excalidash.example.com/api/auth/oidc/callback
+    volumes:
+      - backend-data:/app/prisma
+      - backend-backups:/app/backups
+    networks:
+      - excalidash-network
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      # Use IPv4 loopback explicitly to avoid IPv6 localhost resolution issues.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:8000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    image: ${EXCALIDASH_FRONTEND_IMAGE:-ghcr.io/click-hype/noovicrew-excalidash-frontend:0.6.0}
+    container_name: excalidash-frontend
+    ports:
+      - "6767:80"
+    environment:
+      - BACKEND_URL=backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - excalidash-network
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      # Use IPv4 loopback explicitly to avoid IPv6 localhost resolution issues.
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:80",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+networks:
+  excalidash-network:
+    driver: bridge
+
+volumes:
+  backend-data:
+  backend-backups:

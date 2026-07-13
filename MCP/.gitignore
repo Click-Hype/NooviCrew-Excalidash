@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+public/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Editor artifacts
+.cursor/
+.claude/
+.codex/
+.agent/
+.agents/
+claude_desktop_config.json
+*.mcp.json
+
+# Development artifacts
+*.excalidraw
+
+.DS_Store
