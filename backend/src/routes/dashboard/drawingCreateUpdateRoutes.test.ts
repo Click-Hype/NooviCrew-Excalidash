@@ -124,16 +124,13 @@ describe("drawing write preconditions for agents", () => {
 
   it("notifies open editors after an API-key scene update", async () => {
     const updated = drawing({ version: 5, updatedAt: new Date("2026-01-02T00:00:00Z") });
-    const tx = {
+    const prisma = {
       drawingSnapshot: { create: vi.fn() },
       drawing: {
+        findUnique: vi.fn().mockResolvedValue(drawing()),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue(updated),
       },
-    };
-    const prisma = {
-      drawing: { findUnique: vi.fn().mockResolvedValue(drawing()) },
-      $transaction: vi.fn(async (callback: any) => callback(tx)),
     };
     const emit = vi.fn();
     const { app } = createApp(prisma, emit);
@@ -144,9 +141,58 @@ describe("drawing write preconditions for agents", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.version).toBe(5);
+    expect(prisma.drawing.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "drawing-1", version: 4 } }),
+    );
+    expect(prisma.drawingSnapshot.create).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith(
       "drawing-server-update",
       expect.objectContaining({ drawingId: "drawing-1", version: 5 }),
     );
+  });
+
+  it("still saves the scene when the history snapshot fails", async () => {
+    const updated = drawing({ version: 5 });
+    const prisma = {
+      drawingSnapshot: {
+        create: vi.fn().mockRejectedValue(new Error("snapshot table is full")),
+      },
+      drawing: {
+        findUnique: vi.fn().mockResolvedValue(drawing()),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue(updated),
+      },
+    };
+    const { app } = createApp(prisma);
+
+    const response = await request(app)
+      .put("/drawings/drawing-1")
+      .send({ elements: [], version: 4 });
+
+    expect(response.status).toBe(200);
+    expect(response.body.version).toBe(5);
+  });
+
+  it("reports the current version when the guard loses the race", async () => {
+    const prisma = {
+      drawingSnapshot: { create: vi.fn() },
+      drawing: {
+        findUnique: vi.fn().mockResolvedValue(drawing()),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        findFirst: vi.fn().mockResolvedValue({ version: 7 }),
+      },
+    };
+    const { app } = createApp(prisma);
+
+    const response = await request(app)
+      .put("/drawings/drawing-1")
+      .send({ elements: [], version: 4 });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: "VERSION_CONFLICT",
+      currentVersion: 7,
+    });
+    expect(prisma.drawingSnapshot.create).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,20 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Autosave no longer stops for good when the server version moves ahead of the
+  open editor. A rejected save now rebases the canvas on the server scene
+  (element-wise reconciliation, newest version wins), adopts the server version
+  and retries, so work drawn after the conflict is kept instead of requiring a
+  reload. The conflict banner also offers merging, and an out-of-band update
+  with local work pending is merged instead of forcing a reload.
+- Scene updates no longer wrap the version guard and the history snapshot in a
+  single interactive transaction. Large scenes could exceed the 5s transaction
+  timeout, returning 500 to the editor while the update had already committed —
+  the editor then kept a stale version and every later autosave failed with 409.
+  Version history is now written after the guarded update, best-effort.
+
 ## [0.6.0] - 2026-07-12
 
 ### Added

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { getInitialLangCode } from "../components/LanguageSelector";
 import type { UserIdentity } from "../utils/identity";
 import { useAuth } from "../context/AuthContext";
@@ -53,7 +54,9 @@ export const Editor: React.FC = () => {
     saveState,
     setSaveState,
     hasPendingServerUpdate,
+    setHasPendingServerUpdate,
     handleServerDrawingUpdate,
+    mergeServerUpdateRef,
   } = useEditorSaveState(id);
   const { autoHideEnabled, setAutoHideEnabled } = useEditorAutoHide(id);
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -188,6 +191,7 @@ export const Editor: React.FC = () => {
     debouncedSaveLibrary,
     debouncedSavePreview,
     enqueueSceneSave,
+    rebaseOnServerScene,
     saveDataRef,
     savePreviewRef,
     flushPendingSave,
@@ -199,6 +203,24 @@ export const Editor: React.FC = () => {
     onSaveStateChange: setSaveState,
   });
   useProtectEditorExit({ canEdit, saveState, flushPendingSave });
+  const mergeServerVersion = useCallback(async () => {
+    if (!id) return;
+    await rebaseOnServerScene(id);
+  }, [id, rebaseOnServerScene]);
+  useEffect(() => {
+    mergeServerUpdateRef.current = mergeServerVersion;
+  }, [mergeServerUpdateRef, mergeServerVersion]);
+  const handleMergeServerVersionClick = useCallback(() => {
+    void mergeServerVersion()
+      .then(() => {
+        setHasPendingServerUpdate(false);
+        toast.success("Merged the server version and saved your drawing.");
+      })
+      .catch((err) => {
+        console.error("[Editor] Manual merge with the server failed", err);
+        toast.error("Could not merge the server version. Export your work first.");
+      });
+  }, [mergeServerVersion, setHasPendingServerUpdate]);
   const markSceneChangedSinceLoad = useCallback(() => {
     hasSceneChangesSinceLoadRef.current = true;
   }, [hasSceneChangesSinceLoadRef]);
@@ -314,6 +336,7 @@ export const Editor: React.FC = () => {
         onCanvasDropCapture={handleCanvasDropCapture}
         onExportClick={handleExportClick}
         onLibraryChange={handleLibraryChange}
+        onMergeServerVersion={handleMergeServerVersionClick}
         onNavigateHome={() => navigate("/")}
         onNewNameChange={setNewName}
         onPointerUpdate={onPointerUpdate}

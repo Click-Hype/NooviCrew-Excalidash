@@ -52,6 +52,7 @@ type EditorViewProps = {
   onCanvasDropCapture: (event: React.DragEvent<HTMLDivElement>) => void;
   onExportClick: () => void;
   onLibraryChange: (items: readonly any[]) => void;
+  onMergeServerVersion: () => void;
   onNavigateHome: () => void;
   onNewNameChange: (value: string) => void;
   onPointerUpdate: (payload: any) => void;
@@ -118,6 +119,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   onCanvasDropCapture,
   onExportClick,
   onLibraryChange,
+  onMergeServerVersion,
   onNavigateHome,
   onNewNameChange,
   onPointerUpdate,
@@ -328,8 +330,14 @@ export const EditorView: React.FC<EditorViewProps> = ({
               ? "Saving paused because a newer server version exists."
               : "The drawing changed on the server while you had local work."}
           </p>
-          <p className="mt-1 text-xs">Export your current work before reloading the latest version.</p>
-          <div className="mt-3 flex gap-2">
+          <p className="mt-1 text-xs">
+            Merging keeps both sides and resumes saving. Reloading discards
+            anything drawn since the last successful save, so export first.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={onMergeServerVersion} className="rounded-lg border-2 border-black bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">
+              Merge and keep saving
+            </button>
             <button type="button" onClick={onExportClick} className="rounded-lg border-2 border-black bg-white px-3 py-1.5 text-xs font-bold text-slate-900 dark:bg-neutral-900 dark:text-white">
               Export my work
             </button>

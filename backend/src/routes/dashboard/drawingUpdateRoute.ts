@@ -155,58 +155,57 @@ export const registerDrawingUpdateRoute = (
       if (isSceneUpdate && payload.version !== undefined) {
         updateWhere.version = payload.version;
       }
-      const versionConflictError = new Error("VERSION_CONFLICT");
-      let updatedDrawing: typeof existingDrawing | null = null;
 
-      try {
-        if (isSceneUpdate) {
-          updatedDrawing = await prisma.$transaction(async (tx) => {
-            await tx.drawingSnapshot.create({
-              data: {
-                drawingId: id,
-                version: existingDrawing.version,
-                elements: existingDrawing.elements,
-                appState: existingDrawing.appState,
-                files: existingDrawing.files,
-              },
-            });
-            const updateResult = await tx.drawing.updateMany({
-              where: updateWhere,
-              data,
-            });
-            if (updateResult.count === 0) throw versionConflictError;
-            return tx.drawing.findFirst({ where: { id } });
-          });
-        } else {
-          const updateResult = await prisma.drawing.updateMany({
-            where: updateWhere,
-            data,
-          });
-          if (updateResult.count === 0) {
-            return res.status(404).json({ error: "Drawing not found" });
-          }
-          updatedDrawing = await prisma.drawing.findFirst({ where: { id } });
-        }
-      } catch (error) {
-        if (
-          error === versionConflictError ||
-          (error instanceof Error && error.message === versionConflictError.message)
-        ) {
+      // The version guard is already atomic on its own: a single
+      // `UPDATE ... WHERE id = ? AND version = ?` either wins the race or
+      // matches no row. Wrapping it together with the history snapshot in an
+      // interactive transaction made large scenes exceed Prisma's 5s
+      // transaction timeout — the update still landed while the editor got a
+      // 500, kept its stale version and then failed every autosave with 409
+      // until the page was reloaded, losing the work drawn meanwhile.
+      const updateResult = await prisma.drawing.updateMany({
+        where: updateWhere,
+        data,
+      });
+      if (updateResult.count === 0) {
+        if (isSceneUpdate && payload.version !== undefined) {
           const latestDrawing = await prisma.drawing.findFirst({
             where: { id },
             select: { version: true },
           });
-          if (isSceneUpdate && payload.version !== undefined) {
-            return res.status(409).json({
-              error: "Conflict",
-              code: "VERSION_CONFLICT",
-              message: "Drawing has changed since this editor state was loaded.",
-              currentVersion: latestDrawing?.version ?? null,
-            });
-          }
+          return res.status(409).json({
+            error: "Conflict",
+            code: "VERSION_CONFLICT",
+            message: "Drawing has changed since this editor state was loaded.",
+            currentVersion: latestDrawing?.version ?? null,
+          });
         }
-        throw error;
+        return res.status(404).json({ error: "Drawing not found" });
       }
+
+      if (isSceneUpdate) {
+        // Version history is best-effort: a failed snapshot must never fail a
+        // save that already committed.
+        try {
+          await prisma.drawingSnapshot.create({
+            data: {
+              drawingId: id,
+              version: existingDrawing.version,
+              elements: existingDrawing.elements,
+              appState: existingDrawing.appState,
+              files: existingDrawing.files,
+            },
+          });
+        } catch (error) {
+          console.error("[API] Failed to store drawing snapshot", {
+            id,
+            version: existingDrawing.version,
+            error: error instanceof Error ? error.message : error,
+          });
+        }
+      }
+
+      const updatedDrawing = await prisma.drawing.findFirst({ where: { id } });
       if (!updatedDrawing) {
         return res.status(404).json({ error: "Drawing not found" });
       }

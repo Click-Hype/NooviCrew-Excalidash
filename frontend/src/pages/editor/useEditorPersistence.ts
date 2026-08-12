@@ -10,14 +10,12 @@ import {
   getPersistedAppState,
   hasRenderableElements,
 } from "./shared";
+import {
+  DrawingSaveConflictError,
+  resyncSceneWithServer,
+  saveWithConflictRecovery,
+} from "./sceneResync";
 import type { EditorSaveState } from "./status";
-
-class DrawingSaveConflictError extends Error {
-  constructor(message = "Drawing version conflict") {
-    super(message);
-    this.name = "DrawingSaveConflictError";
-  }
-}
 
 type PersistenceRefs = {
   currentDrawingVersion: MutableRefObject<number | null>;
@@ -146,46 +144,56 @@ export const useEditorPersistence = ({
         refs.latestFiles.current = persistableFiles;
         refs.lastSyncedFiles.current = persistableFiles;
       }
-      const filesChangedSincePersist =
-        Object.keys(
-          getFilesDelta(
-            refs.lastPersistedFiles.current || {},
-            persistableFiles || {},
-          ),
-        ).length > 0;
       const normalizedElementsForSave = Array.from(
         normalizeImageElementStatus(persistableElements, persistableFiles),
       );
-      const persistScene = async (): Promise<void> => {
+      const persistScene = async (
+        sceneElements: readonly any[],
+        sceneFiles: Record<string, any>,
+      ): Promise<void> => {
+        const filesChangedSincePersist =
+          Object.keys(
+            getFilesDelta(refs.lastPersistedFiles.current || {}, sceneFiles || {}),
+          ).length > 0;
         try {
           onSaveStateChange?.("saving");
           const updated = await api.updateDrawing(drawingId, {
-            elements: normalizedElementsForSave,
+            elements: Array.from(sceneElements),
             appState: persistableAppState,
-            ...(filesChangedSincePersist ? { files: persistableFiles } : {}),
+            ...(filesChangedSincePersist ? { files: sceneFiles } : {}),
             version: refs.currentDrawingVersion.current ?? undefined,
           });
           if (typeof updated.version === "number") {
             refs.currentDrawingVersion.current = updated.version;
           }
-          refs.lastPersistedElements.current = normalizedElementsForSave;
+          refs.lastPersistedElements.current = sceneElements;
           if (filesChangedSincePersist) {
-            refs.lastPersistedFiles.current = persistableFiles;
+            refs.lastPersistedFiles.current = sceneFiles;
           }
           onSaveStateChange?.("saved");
         } catch (err) {
-          if (api.isAxiosError(err) && err.response?.status === 409) {
+          const status = api.isAxiosError(err) ? err.response?.status : undefined;
+          // 428 means the editor has no version at all (e.g. a failed initial
+          // load); like 409, resyncing with the server recovers it.
+          if (status === 409 || status === 428) {
             throw new DrawingSaveConflictError();
           }
           throw err;
         }
       };
-      await persistScene();
+      await saveWithConflictRecovery({
+        drawingId,
+        refs,
+        elements: normalizedElementsForSave,
+        files: persistableFiles,
+        persistScene,
+        normalizeElements: normalizeImageElementStatus,
+      });
     } catch (err) {
       if (err instanceof DrawingSaveConflictError) {
         onSaveStateChange?.("conflict");
         toast.error(
-          "Save paused: this drawing changed elsewhere. Export your work or reload before continuing.",
+          "Save paused: could not merge the newer server version. Export your work or reload before continuing.",
         );
         throw err;
       }
@@ -342,11 +350,40 @@ export const useEditorPersistence = ({
     return refs.saveQueue.current;
   }, [debouncedSave, refs]);
 
+  /**
+   * Merges the server scene into the canvas and persists the result. Runs on
+   * the save queue so it never races with an in-flight autosave.
+   */
+  const rebaseOnServerScene = useCallback(
+    (drawingId: string) => {
+      const rebase = refs.saveQueue.current
+        .catch(() => undefined)
+        .then(() => resyncSceneWithServer(drawingId, refs));
+      refs.saveQueue.current = rebase.then(
+        () => undefined,
+        () => undefined,
+      );
+      return rebase.then(() => {
+        const appState = refs.latestAppState.current;
+        if (!appState) return;
+        return enqueueSceneSave(
+          drawingId,
+          refs.latestElements.current,
+          appState,
+          refs.latestFiles.current || {},
+          { suppressErrors: false },
+        );
+      });
+    },
+    [enqueueSceneSave, refs],
+  );
+
   return {
     debouncedSave,
     debouncedSaveLibrary,
     debouncedSavePreview,
     enqueueSceneSave,
+    rebaseOnServerScene,
     saveDataRef,
     savePreviewRef,
     flushPendingSave,
