@@ -1,7 +1,7 @@
 services:
   backend:
     # Stable downstream release. Override with a digest for stricter pinning.
-    image: ${EXCALIDASH_BACKEND_IMAGE:-ghcr.io/click-hype/noovicrew-excalidash-backend:0.6.0}
+    image: ${EXCALIDASH_BACKEND_IMAGE:-ghcr.io/click-hype/noovicrew-excalidash-backend:0.6.1}
     container_name: excalidash-backend
     environment:
       - DATABASE_PROVIDER=sqlite
@@ -59,7 +59,7 @@ services:
       start_period: 60s
 
   frontend:
-    image: ${EXCALIDASH_FRONTEND_IMAGE:-ghcr.io/click-hype/noovicrew-excalidash-frontend:0.6.0}
+    image: ${EXCALIDASH_FRONTEND_IMAGE:-ghcr.io/click-hype/noovicrew-excalidash-frontend:0.6.1}
     container_name: excalidash-frontend
     ports:
       - "6767:80"

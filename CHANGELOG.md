@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-12
+
 ### Fixed
 
 - Autosave no longer stops for good when the server version moves ahead of the
